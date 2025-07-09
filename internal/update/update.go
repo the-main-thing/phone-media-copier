@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"phone-copier/internal/version"
 	"runtime"
 	"strings"
 )
@@ -38,7 +37,7 @@ func getNewBinaryUrl() (string, error) {
 	if error != nil {
 		return "", error
 	}
-	if release.TagName == version.VERSION {
+	if release.TagName == VERSION {
 		return "", nil
 	}
 	var binaryUrl string

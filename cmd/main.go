@@ -1,12 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"phone-copier/internal/copy"
-	"strings"
+	"phone-media-copier/internal/android"
+	"phone-media-copier/internal/update"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -15,179 +12,96 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-type Config struct {
-	TargetDir string   `json:"target_dir"`
-	Subdirs   []string `json:"subdirs"`
+type MainApp struct {
+	window    fyne.Window
+	progress  *widget.ProgressBar
+	startBtn  *widget.Button
+	updateBtn *widget.Button
+	closeBtn  *widget.Button
 }
 
-type AppState struct {
-	config     Config
-	sourceDir  string
-	mainWindow fyne.Window
-	status     *widget.Label
+func newMainApp() *MainApp {
+	a := app.New()
+	w := a.NewWindow("File Copy & Update")
+
+	m := &MainApp{
+		window:   w,
+		progress: widget.NewProgressBar(),
+	}
+
+	m.createUI()
+	return m
 }
 
-func getConfigPath() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		configDir = "."
-	}
-	return filepath.Join(configDir, "dircopier", "config.json")
-}
-
-func loadConfig() Config {
-	defaultConfig := Config{
-		TargetDir: "",
-		Subdirs:   []string{"docs", "images", "data"},
-	}
-
-	configPath := getConfigPath()
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return defaultConfig
-	}
-
-	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
-		return defaultConfig
-	}
-	return config
-}
-
-func saveConfig(config Config) error {
-	configPath := getConfigPath()
-	configDir := filepath.Dir(configPath)
-
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(config, "", "    ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(configPath, data, 0644)
-}
-
-func (state *AppState) startCopying() {
-	if state.sourceDir == "" {
-		dialog.ShowError(fmt.Errorf("please select a source directory"), state.mainWindow)
-		return
-	}
-
-	if state.config.TargetDir == "" {
-		dialog.ShowError(fmt.Errorf("please set target directory in configuration"), state.mainWindow)
-		return
-	}
-
-	if len(state.config.Subdirs) == 0 {
-		dialog.ShowError(fmt.Errorf("please specify subdirectories to copy"), state.mainWindow)
-		return
-	}
-
-	progressBar := widget.NewProgressBar()
-	progressDialog := dialog.NewCustomWithoutButtons(
-		"Copying",
-		container.NewVBox(
-			widget.NewLabel("Copying directories..."),
-			progressBar,
-		),
-		state.mainWindow,
-	)
-	progressDialog.Show()
-
-	copy.Copy(sourcePath, targetPath, func(copiedFiles, totalFiles int) {
-		progressBar.SetValue((float64(copiedFiles) / float64(totalFiles)))
+func (m *MainApp) createUI() {
+	m.startBtn = widget.NewButton("Start", m.handleCopy)
+	m.updateBtn = widget.NewButton("Update", m.handleUpdate)
+	m.closeBtn = widget.NewButton("Close", func() {
+		m.window.Close()
 	})
 
+	buttons := container.NewHBox(m.startBtn, m.updateBtn, m.closeBtn)
+	content := container.NewVBox(
+		buttons,
+		m.progress,
+	)
+
+	m.window.SetContent(content)
+}
+
+func (m *MainApp) handleCopy() {
+	m.setButtonsEnabled(false)
+	m.progress.SetValue(0)
+
+	go func() {
+		err := android.Copy("target/dir", func(progress int) {
+			m.progress.SetValue(float64(progress) / 100)
+		})
+
+		if err != nil {
+			if err.Error() == "no device connected" {
+				dialog.ShowError(fmt.Errorf("Make sure you've connected the device"), m.window)
+			} else {
+				dialog.ShowError(err, m.window)
+			}
+			m.setButtonsEnabled(true)
+		} else {
+			m.setButtonsEnabled(true)
+		}
+	}()
+}
+
+func (m *MainApp) handleUpdate() {
+	m.setButtonsEnabled(false)
+	m.progress.SetValue(0)
+
+	go func() {
+		err := update.Update()
+		if err != nil {
+			dialog.ShowError(err, m.window)
+			m.setButtonsEnabled(true)
+		} else {
+			// Only enable close button after successful update
+			m.startBtn.Disable()
+			m.updateBtn.Disable()
+			m.closeBtn.Enable()
+		}
+	}()
+}
+
+func (m *MainApp) setButtonsEnabled(enabled bool) {
+	m.startBtn.Enable()
+	m.updateBtn.Enable()
+	m.closeBtn.Enable()
+	if !enabled {
+		m.startBtn.Disable()
+		m.updateBtn.Disable()
+		m.closeBtn.Disable()
+	}
 }
 
 func main() {
-	a := app.New()
-	win := a.NewWindow("Directory Copier")
-	state := &AppState{
-		config:     loadConfig(),
-		mainWindow: win,
-	}
-
-	// Config section
-	targetDirEntry := widget.NewEntry()
-	targetDirEntry.SetText(state.config.TargetDir)
-
-	targetDirButton := widget.NewButton("Browse", func() {
-		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
-			if err != nil || uri == nil {
-				return
-			}
-			targetDirEntry.SetText(uri.Path())
-			state.config.TargetDir = uri.Path()
-		}, win)
-	})
-
-	subdirsEntry := widget.NewMultiLineEntry()
-	subdirsEntry.SetText(strings.Join(state.config.Subdirs, "\n"))
-
-	saveConfigBtn := widget.NewButton("Save Configuration", func() {
-		state.config.TargetDir = targetDirEntry.Text
-		state.config.Subdirs = strings.Split(subdirsEntry.Text, "\n")
-		// Clean empty lines
-		var cleanSubdirs []string
-		for _, s := range state.config.Subdirs {
-			if strings.TrimSpace(s) != "" {
-				cleanSubdirs = append(cleanSubdirs, strings.TrimSpace(s))
-			}
-		}
-		state.config.Subdirs = cleanSubdirs
-
-		if err := saveConfig(state.config); err != nil {
-			dialog.ShowError(err, win)
-			return
-		}
-		dialog.ShowInformation("Success", "Configuration saved!", win)
-	})
-
-	// Operation section
-	state.status = widget.NewLabel("Select source directory to begin")
-	state.status.Wrapping = fyne.TextWrapWord
-
-	selectSourceBtn := widget.NewButton("Select Source Directory", func() {
-		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
-			if err != nil || uri == nil {
-				return
-			}
-			state.sourceDir = uri.Path()
-			state.status.SetText(fmt.Sprintf("Selected source directory: %s\nClick 'Start Copying' to proceed", state.sourceDir))
-		}, win)
-	})
-
-	startCopyBtn := widget.NewButton("Start Copying", state.startCopying)
-
-	// Layout
-	configBox := container.NewVBox(
-		widget.NewLabel("Target Directory:"),
-		container.NewBorder(nil, nil, nil, targetDirButton, targetDirEntry),
-		widget.NewLabel("Subdirectories to Copy:"),
-		subdirsEntry,
-		saveConfigBtn,
-	)
-
-	configFrame := widget.NewCard("Configuration", "", configBox)
-
-	operationBox := container.NewVBox(
-		state.status,
-		selectSourceBtn,
-		startCopyBtn,
-	)
-
-	operationFrame := widget.NewCard("Operation", "", operationBox)
-
-	content := container.NewVBox(
-		configFrame,
-		operationFrame,
-	)
-
-	win.SetContent(container.NewPadded(content))
-	win.Resize(fyne.NewSize(600, 400))
-	win.ShowAndRun()
+	app := newMainApp()
+	app.window.Resize(fyne.NewSize(300, 300))
+	app.window.ShowAndRun()
 }

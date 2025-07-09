@@ -1,4 +1,4 @@
-module phone-copier
+module phone-media-copier
 
 go 1.24.4
 

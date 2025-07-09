@@ -3,6 +3,7 @@
 #
 # Binaries for programs and plugins
 *.exe
+!adb.exe
 *.exe~
 *.dll
 *.so
