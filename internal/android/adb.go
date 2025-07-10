@@ -23,9 +23,13 @@ func (c *ADB) Cleanup() {
 var adbFiles embed.FS
 
 func extractADB() (ADB, error) {
-	adbName := "adb"
+	var adbName string
 	if runtime.GOOS == "windows" {
 		adbName = "adb.exe"
+	} else if runtime.GOOS == "darwin" {
+		adbName = "adbMac"
+	} else {
+		adbName = "adb"
 	}
 
 	tempDir, err := os.MkdirTemp("", "adb-tmp")

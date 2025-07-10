@@ -86,6 +86,11 @@ func Copy(targetDir string, onProgress func(progress int)) error {
 		return err
 	}
 
+	err = os.MkdirAll(targetDir, 0755)
+	if err != nil {
+		return err
+	}
+
 	filesToCopy, totalFiles, err := getFilesPathsToCopy(adb.Path)
 	if err != nil {
 		return err

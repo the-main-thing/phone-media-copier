@@ -3,6 +3,7 @@ package update
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -14,6 +15,8 @@ import (
 const RELEASES_URL = "https://api.github.com/repos/the-main-thing/phone-media-copier/releases/latest"
 const WINDOWS_BINARY_NAME = "phone-media-copier-windows-amd64.exe"
 const LINUX_BINARY_NAME = "phone-media-copier-linux-amd64"
+const MAC_ARM64_BINARY_NAME = "phone-media-copier-darwin-arm64"
+const MAC_AMD64_BINARY_NAME = "phone-media-copier-darwin-amd64"
 
 type Release struct {
 	TagName string `json:"tag_name"`
@@ -23,14 +26,30 @@ type Release struct {
 	} `json:"assets"`
 }
 
+func getBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return WINDOWS_BINARY_NAME
+	}
+	if runtime.GOOS == "linux" {
+		return LINUX_BINARY_NAME
+	}
+	if runtime.GOOS == "darwin" {
+		if runtime.GOARCH == "arm64" {
+			return MAC_ARM64_BINARY_NAME
+		}
+		return MAC_AMD64_BINARY_NAME
+	}
+	return ""
+}
+
 func getNewBinaryUrl() (string, error) {
-	resp, err := http.Get("https://github.com/the-main-thing/phone-copier/releases/latest")
+	resp, err := http.Get(RELEASES_URL)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", errors.New("could not get latest version")
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("could not get latest version: %d", resp.StatusCode)
 	}
 	var release Release
 	error := json.NewDecoder(resp.Body).Decode(&release)
@@ -41,16 +60,11 @@ func getNewBinaryUrl() (string, error) {
 		return "", nil
 	}
 	var binaryUrl string
-	var binaryName string
-	if runtime.GOOS == "windows" {
-		binaryName = WINDOWS_BINARY_NAME
-	}
-	if runtime.GOOS == "linux" {
-		binaryName = LINUX_BINARY_NAME
-	}
+	binaryName := getBinaryName()
 	if binaryName == "" {
 		return "", errors.New("unsupported platform")
 	}
+
 	for _, asset := range release.Assets {
 		if strings.Contains(asset.Name, binaryName) {
 			binaryUrl = asset.URL
@@ -101,52 +115,52 @@ func getCurrentBinaryPath() (string, error) {
 	return path, nil
 }
 
-func Update() error {
+func Update() (bool, error) {
 	binaryPath, err := getCurrentBinaryPath()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	binaryUrl, err := getNewBinaryUrl()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if binaryUrl == "" {
-		return nil
+		return false, nil
 	}
 
 	backupPath := binaryPath + ".bak"
 	err = os.Rename(binaryPath, backupPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	newFile, err := os.Create(binaryPath)
 	defer newFile.Close()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	resp, err := http.Get(binaryUrl)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
 
 	_, err = io.Copy(newFile, resp.Body)
 	if err != nil {
-		return err
+		return false, err
 	}
 	err = newFile.Close()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	err = os.Remove(backupPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return nil
+	return true, nil
 
 }

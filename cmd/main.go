@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"phone-media-copier/internal/android"
 	"phone-media-copier/internal/update"
+	"runtime"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -50,11 +53,19 @@ func (m *MainApp) createUI() {
 }
 
 func (m *MainApp) handleCopy() {
-	m.setButtonsEnabled(false)
 	m.progress.SetValue(0)
-
 	go func() {
-		err := android.Copy("target/dir", func(progress int) {
+		m.setButtonsEnabled(false)
+		targetDir, err := GetUserHomeDir()
+		if err != nil {
+			dialog.ShowError(err, m.window)
+			m.setButtonsEnabled(true)
+			return
+		}
+
+		targetDir = filepath.Join(targetDir, "Telephone")
+
+		err = android.Copy(targetDir, func(progress int) {
 			m.progress.SetValue(float64(progress) / 100)
 		})
 
@@ -72,36 +83,53 @@ func (m *MainApp) handleCopy() {
 }
 
 func (m *MainApp) handleUpdate() {
-	m.setButtonsEnabled(false)
 	m.progress.SetValue(0)
 
 	go func() {
-		err := update.Update()
+		m.setButtonsEnabled(false)
+		updated, err := update.Update()
 		if err != nil {
 			dialog.ShowError(err, m.window)
 			m.setButtonsEnabled(true)
 		} else {
-			// Only enable close button after successful update
-			m.startBtn.Disable()
-			m.updateBtn.Disable()
-			m.closeBtn.Enable()
+			if updated {
+				dialog.ShowInformation("Update successful", "The application has been updated", m.window)
+			} else {
+				dialog.ShowInformation("No updates available", "The application is up to date", m.window)
+			}
+			m.setButtonsEnabled(true)
 		}
 	}()
 }
 
 func (m *MainApp) setButtonsEnabled(enabled bool) {
-	m.startBtn.Enable()
-	m.updateBtn.Enable()
-	m.closeBtn.Enable()
-	if !enabled {
-		m.startBtn.Disable()
-		m.updateBtn.Disable()
-		m.closeBtn.Disable()
-	}
+	fyne.DoAndWait(func() {
+		if !enabled {
+			m.startBtn.Disable()
+			m.updateBtn.Disable()
+			m.closeBtn.Disable()
+		} else {
+			m.startBtn.Enable()
+			m.updateBtn.Enable()
+			m.closeBtn.Enable()
+		}
+	})
 }
 
 func main() {
 	app := newMainApp()
 	app.window.Resize(fyne.NewSize(300, 300))
 	app.window.ShowAndRun()
+}
+
+func GetUserHomeDir() (string, error) {
+	if runtime.GOOS == "windows" {
+		homeDrive := os.Getenv("HOMEDRIVE")
+		homePath := os.Getenv("HOMEPATH")
+		if homeDrive != "" && homePath != "" {
+			return homeDrive + homePath, nil
+		}
+		return os.Getenv("USERPROFILE"), nil
+	}
+	return os.Getenv("HOME"), nil
 }
